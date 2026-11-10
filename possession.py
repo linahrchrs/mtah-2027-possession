@@ -16,9 +16,10 @@ Pipeline
   3. per-frame "control candidate": nearest player within a radius, ball speed
      close to the player's speed (control, not a rebound), and no opponent
      equally close (contested balls change nothing)
-  4. hysteresis state machine: possession switches only after the other team
-     keeps control for `control_frames` consecutive frames; loose ball and
-     missing ball keep the previous team (matches the official definition)
+  4. hysteresis state machine: a switch is confirmed only after the other team
+     keeps control for `control_frames` frames, then dated back to that team's
+     first touch (mid-gap if the ball was invisible); loose ball and missing
+     ball keep the previous team (matches the official definition)
   5. dead ball: ball out of bounds, or everyone standing still, or the
      stoppage before a Smart-Tagging set piece; the restarting team takes over
   6. clean-up for spellF1: absorb very short possession / dead-ball spells
@@ -42,6 +43,7 @@ PARAMS = dict(
     control_radius=1.6,     # m: typical reach of a player controlling the ball
     rel_speed_max=3.0,      # m/s: ball moving with the player = control, else rebound/pass
     control_frames=6,       # frames (0.24 s) of sustained control to change possession
+    max_backdate=50,        # frames (2 s): a switch is dated back at most this far (a pass in flight)
     out_margin=0.75,        # m beyond the lines before we call the ball out (tracking noise)
     still_speed=1.3,        # m/s: mean player speed this low = play is stopped
     still_frames=50,        # frames (2 s) of stillness to call a stoppage
@@ -159,22 +161,53 @@ def control_candidates(ball, players, pspeed, team, P):
     moving_with = np.abs(bspeed - np.nan_to_num(ps, nan=99)) < P["rel_speed_max"]
 
     ok = present & (dmin < P["control_radius"]) & moving_with & ~contested
-    return np.where(ok, team[j], NONE)
+    cand = np.where(ok, team[j], NONE)
+    # first-touch evidence: ball within reach of one team only, speed not required
+    # (a reception decelerates the ball, so the speed test fails on the first frames)
+    near_ok = present & (dmin < P["control_radius"]) & ~contested
+    near = np.where(near_ok, team[j], NONE)
+    return cand, near
 
 
-def possession_track(cand, P, start_team=NONE):
-    """Hysteresis: switch only after `control_frames` consecutive frames of the other team."""
-    out = np.full(len(cand), NONE)
-    cur, streak_team, streak = start_team, NONE, 0
-    for t, c in enumerate(cand):
+def find_switch_frame(new, t, last_own, near, cand, missing, P):
+    """Frame where the new team took the ball, for a switch confirmed at frame t.
+
+    Official rule: loose ball stays with the old team, possession changes when the
+    new team gets control. So the change is the new team's first touch after the
+    old team's last control - not the moment our evidence became sufficient.
+    """
+    lo = max(last_own + 1, t - P["max_backdate"], 0)
+    window = np.flatnonzero((near[lo:t + 1] == new) | (cand[lo:t + 1] == new))
+    s = lo + window[0] if len(window) else t
+    # ball invisible right before that first touch: the reception happened somewhere
+    # inside the gap; its midpoint minimises the expected timing error
+    g = s
+    while g > lo and missing[g - 1]:
+        g -= 1
+    if g < s:
+        s = (g + s) // 2
+    return s
+
+
+def possession_track(cand, near, missing, P, start_team=NONE):
+    """Hysteresis: confirm a switch after `control_frames` frames of the other team's
+    control, then date it back to that team's first touch."""
+    n = len(cand)
+    out = np.full(n, NONE)
+    cur, streak_team, streak, last_own = start_team, NONE, 0, -1
+    for t in range(n):
+        c = cand[t]
         if c != NONE and c != cur:
             streak = streak + 1 if c == streak_team else 1
             streak_team = c
-            if streak >= P["control_frames"] or cur == NONE:
-                cur, streak = c, 0
-                out[max(0, t - P["control_frames"] + 1):t + 1] = cur  # backdate the switch
+            if cur == NONE:
+                cur, streak, last_own = c, 0, t
+            elif streak >= P["control_frames"]:
+                s = find_switch_frame(c, t, last_own, near, cand, missing, P)
+                cur, streak, last_own = c, 0, t
+                out[s:t + 1] = cur
         elif c == cur:
-            streak = 0
+            streak, last_own = 0, t
         out[t] = cur
     return out
 
@@ -241,7 +274,8 @@ def estimate(inp, P=PARAMS):
     ball = interp_short_gaps(inp["ball"], P["ball_gap_interp"])
     players, pspeed, team = inp["players"], inp["pspeed"], inp["team"]
 
-    cand = control_candidates(ball, players, pspeed, team, P)
+    cand, near = control_candidates(ball, players, pspeed, team, P)
+    missing = np.isnan(ball).any(1)
     dead, forced = dead_ball(ball, players, pspeed, team, inp.get("restarts", []), P)
 
     # a restart forces the owner for a short window so the state machine starts right
@@ -253,9 +287,10 @@ def estimate(inp, P=PARAMS):
     halves = HALVES if len(ball) == N_FRAMES else [(0, len(ball) - 1)]
     for a, b in halves:
         seg = slice(a, b + 1)
-        c = cand[seg].copy()
+        c, nr = cand[seg].copy(), near[seg].copy()
         c[dead[seg]] = NONE  # no possession evidence while dead
-        poss = possession_track(c, P)
+        nr[dead[seg]] = NONE
+        poss = possession_track(c, nr, missing[seg], P)
         # before the first controlled touch: take the first known owner
         first = np.flatnonzero(poss != NONE)
         if len(first):
