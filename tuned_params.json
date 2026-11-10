@@ -1,0 +1,23 @@
+{
+    "params": {
+      "ball_gap_interp": 10,
+      "control_radius": 0.75,
+      "rel_speed_max": 99.0,
+      "control_frames": 3,
+      "max_backdate": 100,
+      "out_margin": 0.75,
+      "still_rel": 0.9,
+      "still_frames": 100,
+      "walkback_rel": 2.0,
+      "restart_lookback": 750,
+      "min_spell_frames": 25,
+      "min_dead_frames": 50
+    },
+    "source": "Metrica Sports sample-data games 1-2 (external)",
+    "tuned_on": "game 1",
+    "holdout": "game 2",
+    "holdout_spellF1": {
+      "defaults": 0.3158583583087851,
+      "tuned": 0.5006355534923649
+    }
+  }

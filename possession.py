@@ -45,12 +45,24 @@ PARAMS = dict(
     control_frames=6,       # frames (0.24 s) of sustained control to change possession
     max_backdate=50,        # frames (2 s): a switch is dated back at most this far (a pass in flight)
     out_margin=0.75,        # m beyond the lines before we call the ball out (tracking noise)
-    still_speed=1.3,        # m/s: mean player speed this low = play is stopped
+    still_rel=0.6,          # play is stopped when mean player speed < this x the match's
+                            # typical (median) in-play speed - scale-free, so it transfers
+                            # between trackers that measure speed differently
     still_frames=50,        # frames (2 s) of stillness to call a stoppage
+    walkback_rel=1.25,      # before a set piece, a lost ball + this x stillness speed = still stopped
     restart_lookback=750,   # frames (30 s): max dead-ball stretch before a set piece
     min_spell_frames=25,    # frames (1 s): shorter possession spells are absorbed
     min_dead_frames=25,     # frames (1 s): shorter dead-ball spells are absorbed
 )
+
+PRIORS = dict(PARAMS)  # hand-set physical priors, kept for tune_external.py
+
+# Settings tuned on EXTERNAL data by tune_external.py override the priors above.
+_TUNED = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tuned_params.json")
+if os.path.exists(_TUNED):
+    import json
+    with open(_TUNED) as _f:
+        PARAMS.update(json.load(_f)["params"])
 
 HOME, AWAY, NONE = 0, 1, -1
 
@@ -219,23 +231,35 @@ def dead_ball(ball, players, pspeed, team, restarts, P):
     x, y = ball[:, 0], ball[:, 1]
     out = (x < -m) | (x > PITCH_L + m) | (y < -m) | (y > PITCH_W + m)  # NaN -> False
 
-    mean_speed = rolling_mean(np.nanmean(pspeed, axis=1), 25)
-    still = mean_speed < P["still_speed"]
+    with np.errstate(all="ignore"):
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)  # frames with no player tracked
+            mean_speed = rolling_mean(np.nanmean(pspeed, axis=1), 25)
+    mean_speed = np.nan_to_num(mean_speed, nan=0.0)
+    # typical speed of THIS match, over frames where most players are tracked
+    # (excludes pre-match / halftime, when the pitch is empty). No labels involved.
+    tracked = (~np.isnan(pspeed)).sum(1) >= 15
+    typical = np.median(mean_speed[tracked]) if tracked.any() else np.median(mean_speed)
+    still_thr = P["still_rel"] * typical
+    still = mean_speed < still_thr
     dead = np.zeros(n, bool)
     for s, e, v in runs(still):
         if v and e - s >= P["still_frames"]:
             dead[s:e] = True
     dead |= out
 
-    # stoppage before each set piece: walk back while play looks stopped / ball lost
+    # stoppage before each set piece: walk back while players stand still, the ball is
+    # out, or the ball is lost and play is slow (walkback_rel x the stillness threshold)
     forced = {}
-    ball_lost = np.isnan(ball).any(1) | out
+    ball_lost = np.isnan(ball).any(1)
     for fr, t in restarts:
         if not 0 < fr < n:
             continue
         s = fr
         lo = max(0, fr - P["restart_lookback"])
-        while s > lo and (still[s - 1] or ball_lost[s - 1] or mean_speed[s - 1] < 1.5 * P["still_speed"]):
+        while s > lo and (still[s - 1] or out[s - 1]
+                          or (ball_lost[s - 1] and mean_speed[s - 1] < P["walkback_rel"] * still_thr)):
             s -= 1
         if fr - s >= P["min_dead_frames"]:
             dead[s:fr] = True
@@ -283,8 +307,8 @@ def estimate(inp, P=PARAMS):
         if t != NONE:
             cand[fr:fr + P["control_frames"]] = t
 
-    labels = np.full(N_FRAMES if len(ball) == N_FRAMES else len(ball), "X", dtype="<U1")
-    halves = HALVES if len(ball) == N_FRAMES else [(0, len(ball) - 1)]
+    labels = np.full(len(ball), "X", dtype="<U1")
+    halves = inp.get("halves") or (HALVES if len(ball) == N_FRAMES else [(0, len(ball) - 1)])
     for a, b in halves:
         seg = slice(a, b + 1)
         c, nr = cand[seg].copy(), near[seg].copy()
@@ -308,6 +332,8 @@ def main():
     ap.add_argument("--out", default="evaluation/results/rules_v1.csv")
     args = ap.parse_args()
 
+    if os.path.exists(_TUNED):
+        print(f"using tuned params from {_TUNED}")
     labels = estimate(load_inputs())
     pd.DataFrame({"frame": np.arange(N_FRAMES), "label": labels}).to_csv(args.out, index=False)
 
