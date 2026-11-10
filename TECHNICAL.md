@@ -47,6 +47,7 @@ We chose rules over a learned model for three reasons:
 | **Metrica Sports sample-data, games 1–2** (external, public) | **Tuning** | see §5 |
 
 Tried and dropped:
+
 - **Absolute speed thresholds for "play stopped"** (v3). Tuned on the external data, a fixed 1.8 m/s did not transfer, because the competition ATD measures speed on a different scale. v3 labelled 58% of the graded frames dead, which is implausible. The match-relative threshold in v4 fixes this; it now labels 42%.
 - **A ball-speed test for control** (ball moving at the player's speed). External tuning switched it off (`rel_speed_max` = 99): in this noisy tracking it rejected more real receptions than rebounds.
 
@@ -104,6 +105,7 @@ The tuned parameters are kept only if they improve the held-out game. The result
 The public 5 minutes were used only to check that the pipeline is correct: frame alignment, file format, and plausible counts. **No parameter was set by scoring against it.**
 
 One design change was prompted by its report, and we disclose it:
+
 - The v1 report showed possession changes about 16 frames late.
 - The fix (dating changes back to the first touch) follows from the official definition of possession.
 - It was validated on simulated matches, not by re-scoring the public window.
@@ -138,8 +140,8 @@ git clone https://github.com/linahrchrs/mtah-2027-possession.git
 cd mtah-2027-possession
 pip install -r requirements-solution.txt
 # unpack the official match data into ./data (not redistributable, not in the repo)
-python possession.py --out <TEAM_NAME>.csv
-python evaluation/validate_submission.py <TEAM_NAME>.csv
+python possession.py --out lamasIA.csv
+python evaluation/validate_submission.py lamasIA.csv
 ```
 
 `possession.py` is deterministic, so this regenerates the submitted file exactly, using `tuned_params.json` from the repo.
