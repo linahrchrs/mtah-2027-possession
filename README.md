@@ -1,10 +1,12 @@
 # Ball possession from automatic tracking — More than a Hack 2027
 
+**Team: `lamasIA`** · Submission file: [`lamasIA.csv`](lamasIA.csv) · Technical document: [`lamasIA.md`](lamasIA.md)
+
 Our solution to **Phase 1 of [More than a Hack 2027](https://github.com/metrica-sports/more-than-a-hack-2027)** (Metrica Sports · FC Barcelona · Mobile World Capital Barcelona): for every frame of FC Barcelona vs Athletic Club, label who has the ball (`H` / `A`), dead ball (`D`), or no answer on ungraded frames (`X`).
 
 It's a **rule-based possession tracker** over the automatic tracking data. Its few thresholds are **tuned only on external data**: Metrica's public sample games, checked on a held-out game. Nothing is trained or tuned on the competition match, its ground truth or its video.
 
-Full write-up: **[TECHNICAL.md](TECHNICAL.md)**.
+Full write-up: **[lamasIA.md](lamasIA.md)**.
 
 ## How it works
 
@@ -16,7 +18,7 @@ Full write-up: **[TECHNICAL.md](TECHNICAL.md)**.
 
 ## Run it
 
-Requires Python 3.9+.
+Requires Python 3.11+ (the pinned `numpy==2.4.2` and `pandas==3.0.1` need it).
 
 ```bash
 pip install -r requirements-solution.txt
@@ -43,7 +45,8 @@ python tune_external.py --sample-dir ../sample-data/data
 | `possession.py` | the possession estimator; writes the submission CSV |
 | `tune_external.py` | tunes `possession.py`'s thresholds on Metrica's public sample games |
 | `tuned_params.json` | the tuned thresholds used for the submission |
-| `TECHNICAL.md` | technical document: approach, assets, rules, limitations, reproduction |
+| `lamasIA.csv` | the submitted possession file (one label per frame) |
+| `lamasIA.md` | technical document: approach, assets, rules, limitations, reproduction |
 | `evaluation/`, `starter/`, `games.py` | official scorer and starter code from the challenge repository (MIT) |
 
 ## Credits

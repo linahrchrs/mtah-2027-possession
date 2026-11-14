@@ -15,7 +15,7 @@ We chose rules over a learned model for three reasons:
 
 ### Pipeline (`possession.py`)
 
-1. **Load** the tactical ATD with kloppy. Positions are converted to metres (105.3 × 68.0 m). Each of the 46 track slots is mapped to home or away using the metadata. Video frame = `frame_id − 1`.
+1. **Load** the tactical ATD with kloppy. Positions are converted to metres (105.3 × 68.0 m). Each of the 46 track slots (the full set of identities used over the whole match; about 22 are visible at any frame) is mapped to home or away using the metadata. Video frame = `frame_id − 1`.
 2. **Clean the ball.** Only gaps of up to 10 frames (0.4 s) are interpolated. Longer gaps stay missing rather than being invented.
 3. **Control evidence per frame.**
    - The nearest player must be within `control_radius` of the ball.
@@ -41,7 +41,7 @@ We chose rules over a learned model for three reasons:
 | Tactical ATD (players + ball) | **Yes, main input** | positions, speeds (`_s`), team membership |
 | Smart Tagging | **Yes** | `SET PIECES` only: restart frames, and restart team when tagged |
 | Tactical homography | No | not needed: the ATD is already in pitch coordinates |
-| Broadcast video / ATD / homography | No | not frame-aligned, and 34% of frames have no usable homography |
+| Broadcast video / ATD / homography | No | not frame-aligned, and 34% of the broadcast frames have no usable homography |
 | Tactical video | No | not used as input |
 | Public 5-minute ground truth | Correctness checks only | see §6 |
 | **Metrica Sports sample-data, games 1–2** (external, public) | **Tuning** | see §5 |
@@ -72,14 +72,14 @@ These follow CHALLENGE.md's operational definition.
 | `max_backdate` | 50 | **100** | max frames a change is dated back |
 | `still_rel` | 0.6 | **0.9** | "stopped" = below this × the match's median speed |
 | `still_frames` | 50 | **100** | minimum stoppage length (frames) |
-| `walkback_rel` | 1.25 | **2.0** | strictness of the walk-back before a set piece |
+| `walkback_rel` | 1.25 | **2.0** | multiplier on the stillness speed threshold used when the ball is lost before a set piece; higher = more permissive, so the stoppage extends further back |
 | `min_dead_frames` | 25 | **50** | shorter dead runs are absorbed |
 | `min_spell_frames` | 25 | 25 | shorter possession runs are absorbed |
 | `ball_gap_interp`, `out_margin`, `restart_lookback` | 10, 0.75 m, 750 | unchanged | |
 
 ## 5. External tuning (`tune_external.py`)
 
-The rules require tuning on external data only. We used **Metrica Sports' public sample data, games 1 and 2** (github.com/metrica-sports/sample-data; credit: Metrica Sports).
+The rules require tuning on external data only. This is the only labelled dataset we used. Its labels are the human-coded event annotations published by Metrica Sports (not produced by us), covering two full matches (about 350 possessions each); none of it comes from the provided game. We used **Metrica Sports' public sample data, games 1 and 2** (github.com/metrica-sports/sample-data; credit: Metrica Sports).
 
 1. **Reference labels from the human-coded sample events.**
    - Possession is the team of the last on-ball event (pass, set piece, shot, recovery, ball lost); challenges do not change it.
@@ -124,13 +124,13 @@ On the full match, as a check that needs no labels, v4 labels 42% of graded fram
 
 ## 7. Limitations
 
-- **The simulation gap.** Tuning relies on degraded sample tracking. In the sample games the ball is missing during most stoppages, and v4 partly relies on that "ball lost before a set piece" signal. If the competition ATD keeps tracking the ball out of play, that part helps less.
+- **The simulation gap.** Tuning relies on degraded sample tracking. In the sample games the ball is missing during most stoppages, and v4 (lamasIA.csv) partly relies on that "ball lost before a set piece" signal. If the competition ATD keeps tracking the ball out of play, that part helps less.
 - **Wrong team after receptions.** The tight 0.75 m radius increases home/away confusion on the public window (536 home frames labelled away). A radius scaled to local player density could reduce this.
 - **No pass model.** A long pass to a teammate is never confused for a change, but an interception during a long ball-loss gap is placed by a rule (the middle of the gap), not estimated from the trajectory.
 - **Identity switches and duplicates** are not repaired: team membership per slot is trusted.
 - **With more time:**
   - model the ball trajectory through gaps (a Kalman filter or physics-based interpolation)
-  - use the homography and video to recover the ball in the 41% of frames where the ATD loses it
+  - use the homography and video to recover the ball in the 41% of tactical frames where the ATD loses it (a different measure from the broadcast homography gap in §2)
   - tune on more external games, with more realistic tracker noise
 
 ## 8. Reproduction
